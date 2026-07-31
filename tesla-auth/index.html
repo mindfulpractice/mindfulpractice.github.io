@@ -99,20 +99,14 @@
     <button class="btn" onclick="startAuth()">Sign in with Tesla</button>
   </div>
 
-  <!-- Step 2: Processing (shown after redirect) -->
-  <div id="view-loading" class="hidden">
-    <h1>Connecting...</h1>
-    <p class="subtitle"><span class="spinner"></span> Exchanging credentials with Tesla</p>
-  </div>
-
-  <!-- Step 3: QR code -->
+  <!-- Step 2: QR code -->
   <div id="view-qr" class="hidden">
     <h1>Scan with Light Phone</h1>
     <p class="subtitle">Open the Tesla tool, tap Connect, and scan this code.</p>
     <div id="qr-container"></div>
-    <button class="btn" id="copy-btn" onclick="copyToken()" style="margin-top:16px;font-size:13px;padding:10px 24px;">Copy Token</button>
-    <p class="step">This code expires when you close this page.<br>
-    <strong>Do not share it.</strong></p>
+    <button class="btn" id="copy-btn" onclick="copyPayload()" style="margin-top:16px;font-size:13px;padding:10px 24px;">Copy Code</button>
+    <p class="step">This code expires in a few minutes.<br>
+    <strong>Scan quickly. Do not share it.</strong></p>
   </div>
 
   <!-- Error -->
@@ -127,13 +121,13 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrious/4.0.2/qrious.min.js"></script>
 
 <script>
+  // ── Config ────────────────────────────────────────────
   const CLIENT_ID = 'de28b12c-8cbc-4093-af37-dd7701c08f65';
-  const CLIENT_SECRET = 'ta-secret.QDHLPYfIjLMl&DmW';
   const REDIRECT_URI = window.location.origin + window.location.pathname;
   const SCOPES = 'openid offline_access vehicle_device_data vehicle_cmds vehicle_charging_cmds';
   const AUTH_URL = 'https://auth.tesla.com/oauth2/v3/authorize';
-  const TOKEN_URL = 'https://auth.tesla.com/oauth2/v3/token';
 
+  // ── PKCE helpers ──────────────────────────────────────
   function generateRandom(length) {
     const arr = new Uint8Array(length);
     crypto.getRandomValues(arr);
@@ -150,6 +144,7 @@
       .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
   }
 
+  // ── Views ─────────────────────────────────────────────
   function show(viewId) {
     document.querySelectorAll('.card > div').forEach(d => d.classList.add('hidden'));
     document.getElementById(viewId).classList.remove('hidden');
@@ -160,6 +155,7 @@
     show('view-error');
   }
 
+  // ── OAuth flow ────────────────────────────────────────
   async function startAuth() {
     const state = generateRandom(16);
     const codeVerifier = generateRandom(32);
@@ -181,66 +177,39 @@
     window.location.href = AUTH_URL + '?' + params.toString();
   }
 
-  async function handleCallback(code, state) {
-    show('view-loading');
-
+  function handleCallback(code, state) {
     const savedState = sessionStorage.getItem('tesla_state');
     const codeVerifier = sessionStorage.getItem('tesla_verifier');
 
     if (!savedState || state !== savedState) {
-      showError('State mismatch \u2014 please try again.');
+      showError('State mismatch — please try again.');
       return;
     }
 
-    try {
-      const resp = await fetch(TOKEN_URL, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: new URLSearchParams({
-          grant_type: 'authorization_code',
-          client_id: CLIENT_ID,
-          client_secret: CLIENT_SECRET,
-          code: code,
-          code_verifier: codeVerifier,
-          redirect_uri: REDIRECT_URI,
-        }),
-      });
+    // Clean up session storage
+    sessionStorage.removeItem('tesla_state');
+    sessionStorage.removeItem('tesla_verifier');
 
-      if (!resp.ok) {
-        const body = await resp.text();
-        throw new Error('Tesla returned ' + resp.status + ': ' + body);
-      }
-
-      const data = await resp.json();
-      const refreshToken = data.refresh_token;
-
-      if (!refreshToken) {
-        throw new Error('No refresh token in response.');
-      }
-
-      sessionStorage.removeItem('tesla_state');
-      sessionStorage.removeItem('tesla_verifier');
-
-      showQR(refreshToken);
-
-    } catch (e) {
-      showError(e.message || 'Failed to exchange token.');
-    }
+    // Pass the authorization code + verifier to the app via QR.
+    // The app will exchange them for tokens (keeping client_secret private).
+    showQR(code, codeVerifier);
   }
 
-  let currentToken = null;
+  let currentPayload = null;
 
-  function copyToken() {
-    if (!currentToken) return;
-    navigator.clipboard.writeText(currentToken).then(() => {
+  function copyPayload() {
+    if (!currentPayload) return;
+    navigator.clipboard.writeText(currentPayload).then(() => {
       const btn = document.getElementById('copy-btn');
       btn.textContent = 'Copied!';
-      setTimeout(() => { btn.textContent = 'Copy Token'; }, 2000);
+      setTimeout(() => { btn.textContent = 'Copy Code'; }, 2000);
     });
   }
 
-  function showQR(token) {
-    currentToken = token;
+  function showQR(code, verifier) {
+    // Format: tesla-auth:CODE|VERIFIER
+    // The app detects the tesla-auth: prefix and splits on |
+    currentPayload = 'tesla-auth:' + code + '|' + verifier;
     show('view-qr');
     const container = document.getElementById('qr-container');
     container.innerHTML = '';
@@ -248,16 +217,15 @@
     const canvas = document.createElement('canvas');
     container.appendChild(canvas);
 
-    const payload = 'tesla-token:' + token;
-
     new QRious({
       element: canvas,
-      value: payload,
+      value: currentPayload,
       size: 260,
       level: 'M',
     });
   }
 
+  // ── On page load: check for OAuth callback ────────────
   (function init() {
     const params = new URLSearchParams(window.location.search);
     const code = params.get('code');
