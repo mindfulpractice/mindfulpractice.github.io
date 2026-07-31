@@ -92,25 +92,30 @@
 <body>
 
 <div class="card">
+  <!-- Step 1: Sign in -->
   <div id="view-start">
     <h1>Tesla Connect</h1>
     <p class="subtitle">Sign in with your Tesla account to connect your Light Phone.</p>
     <button class="btn" onclick="startAuth()">Sign in with Tesla</button>
   </div>
 
+  <!-- Step 2: Processing (shown after redirect) -->
   <div id="view-loading" class="hidden">
     <h1>Connecting...</h1>
     <p class="subtitle"><span class="spinner"></span> Exchanging credentials with Tesla</p>
   </div>
 
+  <!-- Step 3: QR code -->
   <div id="view-qr" class="hidden">
     <h1>Scan with Light Phone</h1>
     <p class="subtitle">Open the Tesla tool, tap Connect, and scan this code.</p>
     <div id="qr-container"></div>
+    <button class="btn" id="copy-btn" onclick="copyToken()" style="margin-top:16px;font-size:13px;padding:10px 24px;">Copy Token</button>
     <p class="step">This code expires when you close this page.<br>
     <strong>Do not share it.</strong></p>
   </div>
 
+  <!-- Error -->
   <div id="view-error" class="hidden">
     <h1>Something went wrong</h1>
     <p id="error-message" class="error"></p>
@@ -118,6 +123,7 @@
   </div>
 </div>
 
+<!-- QR code library (lightweight, no dependencies) -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrious/4.0.2/qrious.min.js"></script>
 
 <script>
@@ -182,7 +188,7 @@
     const codeVerifier = sessionStorage.getItem('tesla_verifier');
 
     if (!savedState || state !== savedState) {
-      showError('State mismatch — please try again.');
+      showError('State mismatch \u2014 please try again.');
       return;
     }
 
@@ -222,7 +228,19 @@
     }
   }
 
+  let currentToken = null;
+
+  function copyToken() {
+    if (!currentToken) return;
+    navigator.clipboard.writeText(currentToken).then(() => {
+      const btn = document.getElementById('copy-btn');
+      btn.textContent = 'Copied!';
+      setTimeout(() => { btn.textContent = 'Copy Token'; }, 2000);
+    });
+  }
+
   function showQR(token) {
+    currentToken = token;
     show('view-qr');
     const container = document.getElementById('qr-container');
     container.innerHTML = '';
